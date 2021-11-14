@@ -416,3 +416,20 @@ prodEq1
 |> solve "c" (ValsProp ([60N; 120N; 240N; 500N; 1000N] |> Set.ofList))
 |> printEqs 
 |> ignore
+
+#!markdown
+
+Some experimenting with removing multiples
+
+#!fsharp
+
+let list = [2; 3; 5; 6; 9; 11; 12; 16; 19; 20; 25; 27; 31; 40; 47; 50]
+let IsMultiple y x =
+   x = y || x % y <> 0
+
+let rec RemoveAllMultiples l1 l2 =
+   match l1 with
+   | head :: tail -> RemoveAllMultiples tail (List.filter (IsMultiple head) l2)
+   | [] -> l2
+
+RemoveAllMultiples list list
