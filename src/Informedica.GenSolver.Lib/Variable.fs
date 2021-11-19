@@ -2,7 +2,22 @@
 
 open System
 open MathNet.Numerics
-open Informedica.GenSolver.Utils
+
+
+module Set =
+
+    open Informedica.Utils.Lib.BCL
+
+    let removeBigRationalMultiples xs =
+        xs
+        |> Set.fold (fun acc x1 ->
+            acc 
+            |> Set.filter (fun x2 ->
+                x1 = x2 ||
+                x2 |> BigRational.isMultiple x1 |> not
+            )
+        ) xs
+
 
 
 /// Contains functions and types to represent
@@ -222,25 +237,14 @@ module Variable =
                     |> Exceptions.raiseExc
                 else
                     i
-                    |> Set.toList
-                    |> List.sort
-                    |> List.fold (fun acc v ->
-                        if acc |> List.isEmpty then [v]
+                    |> Set.removeBigRationalMultiples
+                    |> fun xs ->
+                        if xs |> Set.isEmpty then 
+                            Set.empty 
+                            |> Exceptions.IncrementZeroNegativeOrEmpty 
+                            |> Exceptions.raiseExc
                         else
-                            match acc |> List.tryFind (BigRational.isMultiple v) with
-                            | Some _ -> acc
-                            | None   -> [v] |> List.append acc
-
-                    ) []
-                    |> function
-                    | [] -> 
-                        Set.empty 
-                        |> Exceptions.IncrementZeroNegativeOrEmpty 
-                        |> Exceptions.raiseExc
-                    | xs ->
-                        xs
-                        |> Set.ofList
-                        |> Increment
+                            xs |> Increment
 
 
         module Exceptions =
@@ -381,17 +385,6 @@ module Variable =
         /// to **min**, **incr** and **max** constraints
         let filter min incr max = Set.filter (isBetweenAndMultOf min incr max)
 
-
-        /// Calculate `Minimum` as a multiple of `Increment` **incr**.
-        /// This assumes that the smallest increment will calculate the smallest 
-        /// minimum as a multiple of that increment.
-        let minMultipleOf incr min =
-            let n  = min  |> Minimum.minToBigRational
-            let d  = incr |> Increment.incrToBigRationalSet |> Set.minElement
-            let n' = n    |> BigRational.toMinMultipleOf d
-            
-            if min |> Minimum.isMinExcl && n' <= n then n' + d else n'
-
         /// Calculate the smallest possible `Minimum` that is a multiple of 
         /// an increment in the set of `Increment`.
         let minMultipleOf2 incr min =
@@ -411,32 +404,35 @@ module Variable =
             ) (None)
 
 
+        /// Calculate `Minimum` as a multiple of `Increment` **incr**.
+        /// This assumes that the smallest increment will calculate the smallest 
+        /// minimum as a multiple of that increment.
+        let minMultipleOf incr min =
+            let n  = min  |> Minimum.minToBigRational
+            let d  = incr |> Increment.incrToBigRationalSet |> Set.minElement
+                // TODO: fix this as this gives a div by zero exception
+                // match min |> minMultipleOf2 incr with
+                // | Some x -> x
+                // | None   -> incr |> Increment.incrToBigRationalSet |> Set.minElement
+            let n' = n    |> BigRational.toMinMultipleOf d
+            
+            if min |> Minimum.isMinExcl && n' <= n then n' + d else n'
+
+
         // Calculate `Maximum` **max** as a multiple of **incr**.
         let maxMultipleOf incr max =
-            let n  = max  |> Maximum.maxToBigRational
-            let d  = incr |> Increment.incrToBigRationalSet |> Set.minElement
-            let n' = n    |> BigRational.toMaxMultipleOf d
+            let m  = max  |> Maximum.maxToBigRational
+            let isExcl = max |> Maximum.isMaxExcl
 
-            if max |> Maximum.isMaxExcl && n' >= n then n' - d else n'
-
-
-        /// Calculate the largest possible `Maximum` that is a multiple of 
-        /// an increment in the set of `Increment`.
-        let maxMultipleOf2 incr max =
-            let m = max |> Maximum.maxToBigRational
-
-            incr
-            |> Increment.incrToBigRationalSet
+            incr 
+            |> Increment.incrToBigRationalSet   
             |> Set.fold (fun acc i ->
                 let m' = m |> BigRational.toMaxMultipleOf i
                 let m' = 
-                    if max |> Maximum.isMaxExcl && m' >= m then m' - i else m'
-
-                match acc with
-                | Some m'' -> if m' > m'' then Some m' else acc
-                | None     -> Some m'
-                    
-            ) (None)
+                    if isExcl && m' >= m then m' - i else m'
+                
+                if m' > acc then m' else acc
+            ) m
 
 
         /// Create a set of `BigRational` using **min**, **incr** and a **max**.
@@ -536,8 +532,8 @@ module Variable =
                     print None false incr (Some max) incl
 
                 let fMinMax (min, max) =
-                    let maxincl, min = min |> Minimum.minToBoolBigRational
-                    let minincl, max = max |> Maximum.maxToBoolBigRational
+                    let minincl, min = min |> Minimum.minToBoolBigRational
+                    let maxincl, max = max |> Maximum.maxToBoolBigRational
 
                     print (Some min) minincl [] (Some max) maxincl
 
@@ -880,7 +876,8 @@ module Variable =
                 match x1, x2 with
                 | Some (v1), Some (v2) ->
                     if op |> BigRational.opIsDiv && v2 = 0N then None
-                    else v1 |> op <| v2 |> c (incl1 && incl2) |> Some
+                    else 
+                        v1 |> op <| v2 |> c (incl1 && incl2) |> Some
                 | _ -> None
 
 
@@ -1029,7 +1026,7 @@ module Variable =
                     |> Set.ofList
                     |> Increment.createIncr
                     |> Some
-
+                // incr cannot be calculated based on division or subtraction
                 |  _ -> None
 
             | _ -> None
@@ -1044,6 +1041,15 @@ module Variable =
         let calc op (x1, x2) =
             let calcOpt = calcOpt op
 
+            // Note: doing this can have serious performance issues!!
+            // let toVS vr =
+            //     match vr with
+            //     | Range(MinIncrMax (min, inr, max)) -> minIncrMaxToValueSet min inr max
+            //     | _ -> vr
+            // // first check if range can be changed to valueset
+            // let x1 = x1 |> toVS
+            // let x2 = x2 |> toVS
+
             match x1, x2 with
             | Unrestricted, Unrestricted -> unrestricted
             | ValueSet s1, ValueSet s2 ->
@@ -1056,10 +1062,10 @@ module Variable =
                 else
                     Seq.allPairs s1 s2
                     |> Seq.map (fun (x1, x2) -> x1 |> op <| x2)
-                    |> Set.ofSeq
                     |> createValueSet
 
             // A set with an increment results in a new set of increment
+            // Need to match all scenarios with a valueset and an increment
             | ValueSet s, Range(MinIncr(_, i))
             | Range(MinIncr(_, i)), ValueSet s
 
@@ -1070,7 +1076,22 @@ module Variable =
             | Range(IncrMax(i, _)), ValueSet s
 
             | ValueSet s, Range(MinIncr(_, i))
-            | Range(IncrMax(i, _)), ValueSet s ->
+            | Range(IncrMax(i, _)), ValueSet s 
+
+            | ValueSet s, Range(MinIncrMax(_, i, _))
+            | Range(MinIncrMax(_, i, _)), ValueSet s 
+
+            | ValueSet s, Range(MinIncrMax(_, i, _))
+            | Range(MinIncr(_, i)), ValueSet s 
+
+            | ValueSet s, Range(MinIncrMax(_, i, _))
+            | Range(IncrMax(i, _)), ValueSet s 
+
+            | ValueSet s, Range(MinIncr(_, i))
+            | Range(MinIncrMax(_, i, _)) , ValueSet s 
+
+            | ValueSet s, Range(IncrMax(i, _))
+            | Range(MinIncrMax(_, i, _)) , ValueSet s ->
 
                 let min1, max1 = x1 |> getMin, x1 |> getMax
                 let min2, max2 = x2 |> getMin, x2 |> getMax
@@ -1097,9 +1118,9 @@ module Variable =
                         (min2 |> getMin)
                         (max2 |> getMax)
 
+                // calculate a new increment based upon the valueset and an increment
                 let incr1 = i |> Some
                 let incr2 = s |> Increment.createIncr |> Some
-
                 let incr = calcIncr op incr1 incr2
 
                 match min, incr, max with
@@ -1133,6 +1154,7 @@ module Variable =
                         (min2 |> getMin)
                         (max2 |> getMax)
 
+                // calculate a new increment based upon the incr1 and incr2
                 let incr = calcIncr op incr1 incr2
 
                 match min, incr, max with
@@ -1245,7 +1267,7 @@ module Variable =
     let get = apply id
 
 
-    let toString exact { Name = n; Values = vs } =
+    let toString exact ({ Name = n; Values = vs }: Variable) =
         vs
         |> ValueRange.toString exact
         |> sprintf "%s %s" (n |> Name.toString)
@@ -1365,7 +1387,6 @@ module Variable =
 
         let inline (<==) v1 v2 = (?<-) Expr v1 v2
 
-        let hello x = x * 2
 
     /// Handle the creation of a `Variable` from a `Dto` and
     /// vice versa.

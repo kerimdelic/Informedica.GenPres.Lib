@@ -1,4 +1,4 @@
-﻿namespace Informedica.GenSolver.Tests
+﻿module Tests
 
 open MathNet.Numerics
 
@@ -33,7 +33,57 @@ module Generators =
             { new Arbitrary<BigRational>() with
                 override x.Generator = bigRGenerator }
 
-    let config = { FsCheckConfig.defaultConfig with arbitrary = [typeof<BigRGenerator>] }
+    let config = { 
+        FsCheckConfig.defaultConfig with 
+            arbitrary = [typeof<BigRGenerator>] 
+        }
+
+
+module Utils =
+
+    let config = Generators.config
+
+    [<Tests>]
+    let tests =
+
+        testList "Utils tests" [
+
+            testList "Given an empty set of increments" [
+                let act =
+                    10N
+                    |> BigRational.maxInclMultipleOf Set.empty
+                let exp = (true, 10N)        
+
+                test "any max will remain the same max" {
+                    Expect.equal "always true" exp act
+                }   
+
+                testPropertyWithConfig config "with any incl or excl min max" <| fun (minmax : bool * bool * BigRational) ->
+                    let (b1, b2, m) = minmax
+                    BigRational.calcMinOrMaxToMultiple b1 b2 Set.empty m
+                    |> Expect.equal "should return the same" (b2, m)
+
+                testPropertyWithConfig config "with any max" <| fun (m : BigRational) ->
+                    m
+                    |> BigRational.maxInclMultipleOf Set.empty
+                    |> Expect.equal "should return the same" (true, m)
+
+                testPropertyWithConfig config "with any min" <| fun (m : BigRational) ->
+                    m
+                    |> BigRational.minInclMultipleOf Set.empty
+                    |> Expect.equal "should return the same" (true, m)
+            ]            
+
+            testList "Given any set of increments" [
+                
+                testPropertyWithConfig config "with max incl 10" <| fun (incrs: BigRational list) ->
+                    Expect.isTrue "true" true
+
+            ]
+
+        ]
+
+
 
 
 
@@ -62,6 +112,42 @@ module Name =
                 s 
                 |> create (succ s) fail
             |> testProperty "The succ and fail function will catch all exceptions"
+        ]
+
+
+
+module Increment =
+
+    open Informedica.GenSolver.Lib.Variable.ValueRange
+
+    [<Tests>]
+    let tests =
+        testList "Increment" [
+
+            test "create" {
+                let act = 
+                    [2N; 3N; 6N; 11N; 12N; 16N; 19N]
+                    |> Set.ofList
+                    |> Increment.createIncr
+                    |> Increment.incrToBigRationalSet
+
+                let exp = [2N; 3N; 11N; 19N] |> Set.ofList
+                Expect.equal "removes multiples" exp act
+            }
+
+            test "create min incr range" {
+                let act = 
+                    [2N; 3N; 6N; 11N; 12N; 16N; 19N]
+                    |> Set.ofList
+                    |> createMinIncrRange
+                    |> function
+                    | MinIncr(_, (Increment vs)) -> vs
+                    | _ -> Set.empty
+
+                let exp = [2N; 3N; 11N; 19N] |> Set.ofList
+                Expect.equal "removes multiples" exp act
+            }
+
         ]
 
 
@@ -260,8 +346,7 @@ module ValueRange =
 
                 |> testProp "The result can contain any Value GTE one"
             ]
-
-            
+          
             testList "Given Min is None Incr is None Max Incl is 1" [
             
                 let min = None
@@ -339,7 +424,6 @@ module ValueRange =
                 |> testProp "The ValueRange can only any Value equal to or between 2 and 4"
             
             ]
-
 
             testList "Given a ValueRange with a Min and a ValueRange with a Min" [
 
@@ -447,7 +531,6 @@ module ValueRange =
 
             ]
             
-
             testList "Given calculation with ValueRange with a Max and a ValueRange with a Min" [
 
                 let createVrMin incl v = ValueRange.create None (v |> Minimum.createMin incl |> Some) None None
@@ -653,4 +736,40 @@ module ValueRange =
             ] 
 
 
+        ]
+
+
+
+module Variable =
+    
+    open Variable.Operators
+
+    [<Tests>]
+    let tests =
+
+        testList "Given a variable with an incr and upper limit" [
+
+            test "multiplying by 1 should" {
+                let v1 =
+                    Variable.Dto.createNew "v1"
+                    |> Variable.Dto.setVals [1N]
+                    |> Variable.Dto.fromDto
+
+                let v2 = 
+                    Variable.Dto.createNew "v2"
+                    // ToDo: shouldn't need to set min
+                    |> Variable.Dto.setMin (Some 1N) true
+                    |> Variable.Dto.setIncr [1N]
+                    |> Variable.Dto.setMax (Some 5N) true
+                    |> Variable.Dto.fromDto
+
+                let exp = [1N]    
+                let act = 
+                    v1 ^* v2
+                    |> Variable.Dto.toDto
+                    |> fun x -> x.Incr
+
+                Expect.equal "the result should have an increment 1" exp act
+
+            }
         ]
